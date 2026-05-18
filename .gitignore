@@ -1,0 +1,17 @@
+# Datos personales y reportes generados (no subir)
+Asistencia.xlsx
+Reporte_Personal.html
+Reporte_Asistencia.xlsx
+Reporte_Descansos.xlsx
+
+# Scripts temporales de debug
+_debug.ps1
+_check_martinez.ps1
+_enviar_reporte.ps1
+
+# Carpeta n8n (no relacionada)
+n8n-mcp-main/
+
+# Windows
+Thumbs.db
+desktop.ini
