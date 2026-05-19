@@ -13,12 +13,11 @@ function ParseTurnoEnd([string]$turno) {
     if ($times.Count -ge 2) { return ParseTime $times[$times.Count - 1].Value }
     return $null
 }
-function GetFechaDate([string]$fecha) {
-    $m = [regex]::Match($fecha, '\d{2}-\d{2}-\d{4}')
-    if ($m.Success) {
-        try { return [datetime]::ParseExact($m.Value, 'dd-MM-yyyy', $null) } catch { return $null }
-    }
-    return $null
+function GetFechaISO([string]$fecha) {
+    # Convierte "dd-MM-yyyy" a "yyyy-MM-dd" para comparacion de strings
+    $m = [regex]::Match($fecha, '(\d{2})-(\d{2})-(\d{4})')
+    if ($m.Success) { return "$($m.Groups[3].Value)-$($m.Groups[2].Value)-$($m.Groups[1].Value)" }
+    return ''
 }
 
 # ---- READ SOURCE ----
@@ -44,10 +43,10 @@ $srcWb.Close($false); $xl.Quit()
 $data = @($data | Where-Object { $_.Apellidos -notlike '*AIRALA*' })
 
 # Solo tomar datos a partir del 08/04/2026
-$startDate = [datetime]::ParseExact('08-04-2026', 'dd-MM-yyyy', $null)
+$startISO = '2026-04-08'
 $data = @($data | Where-Object {
-    $fd = GetFechaDate $_.Fecha
-    $fd -eq $null -or $fd -ge $startDate
+    $iso = GetFechaISO $_.Fecha
+    $iso -eq '' -or $iso -ge $startISO
 })
 
 $dataWD = $data | Where-Object {
@@ -65,8 +64,10 @@ $feriadosPattern = ($feriadosFechas | ForEach-Object { [regex]::Escape($_) }) -j
 $justificaciones = @(
     [PSCustomObject]@{
         Apellidos  = 'DEMARCHIS'
-        FechaDesde = [datetime]::ParseExact('08-04-2026', 'dd-MM-yyyy', $null)
-        FechaHasta = [datetime]::ParseExact('10-04-2026', 'dd-MM-yyyy', $null)
+        ISODesde   = '2026-04-08'
+        ISOHasta   = '2026-04-10'
+        DispDesde  = '08/04'
+        DispHasta  = '10/04/2026'
         Motivo     = 'Viaje a Chile'
         Icono      = '&#9992;'
     }
@@ -91,9 +92,9 @@ foreach ($p in $personas) {
     $ausDetails = @($rowsLab | Where-Object { $_.E1 -eq '' -and $_.S1 -eq '' -and $_.E2 -eq '' -and $_.S2 -eq '' } | ForEach-Object {
         $rowF = $_.Fecha; $rowT = $_.Turno
         $isFut    = $rowF -match '\b(1[5-9]|[2-9]\d)-05-2026\b'
-        $fd       = GetFechaDate $rowF
-        $jMatch   = if ($fd -ne $null -and $justifPersona.Count -gt 0) {
-            $justifPersona | Where-Object { $fd -ge $_.FechaDesde -and $fd -le $_.FechaHasta } | Select-Object -First 1
+        $isoF     = GetFechaISO $rowF
+        $jMatch   = if ($isoF -ne '' -and $justifPersona.Count -gt 0) {
+            $justifPersona | Where-Object { $isoF -ge $_.ISODesde -and $isoF -le $_.ISOHasta } | Select-Object -First 1
         } else { $null }
         $isJustif = $jMatch -ne $null
         [PSCustomObject]@{ Fecha=$rowF; Turno=$rowT; Futuro=$isFut; Justificado=$isJustif; Motivo=if($isJustif){$jMatch.Motivo}else{''} }
@@ -809,7 +810,7 @@ foreach ($g in $grupos) {
             foreach ($j in $per.JustifPersona) {
                 $diasJustif = @($per.AusDetails | Where-Object { $_.Justificado -and $_.Motivo -eq $j.Motivo })
                 $html += "<div class='nov-total' style='color:var(--green)'>$($j.Motivo)</div>"
-                $html += "<div class='nov-sub'>$($j.FechaDesde.ToString('dd/MM')) al $($j.FechaHasta.ToString('dd/MM/yyyy'))</div>"
+                $html += "<div class='nov-sub'>$($j.DispDesde) al $($j.DispHasta)</div>"
                 if ($diasJustif.Count -gt 0) {
                     $html += "<table class='nov-table' style='margin-top:8px'><tr><th>Fecha</th><th>Turno</th><th>Motivo</th></tr>"
                     foreach ($d in $diasJustif) {
