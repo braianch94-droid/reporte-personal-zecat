@@ -121,6 +121,9 @@ $justificaciones = @(
 # Empleados con turno de 8h Lun-Jue y 7h Vie (en vez de 9h/8h estandar)
 $turnoCortoApellidos = @('PENIDA','COTUGNO','SANDOVAL','KAPP','CACERES')
 
+# Empleados cuyas inconsistencias son por fichada faltante (no deficit real) -> se fuerza a 0
+$sinInconsistencias = @('DEMARCHIS','CAÑETE')
+
 $allPersonas = @()
 foreach ($p in $personas) {
     $pts = $p -split '\|'
@@ -238,6 +241,13 @@ foreach ($p in $personas) {
     $demoraBreakTotalMin    = if ($demoraBreak.Count  -gt 0) { [int]($demoraBreak | Measure-Object -Property DemoraMin -Sum).Sum } else { 0 }
     $breakExcedidoExcessMin = if ($breakExcedido.Count -gt 0) { [int](($breakExcedido | ForEach-Object { [math]::Max(0, $_.BreakMin - 60) }) | Measure-Object -Sum).Sum } else { 0 }
     $totalInconsistenciaMin = $totalDeficitMin + $demoraBreakTotalMin + $breakExcedidoExcessMin
+
+    # Si la inconsistencia es por fichada faltante (no deficit real), se anula
+    if (($sinInconsistencias | Where-Object { $apell -like "*$_*" }).Count -gt 0) {
+        $totalInconsistenciaMin = 0
+        $deficitDias = @()
+        $totalDeficitMin = 0
+    }
 
     # ---- HORAS EXTRAS ----
     $rowsSabOT = @($data | Where-Object {
