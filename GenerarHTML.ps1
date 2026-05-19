@@ -145,13 +145,6 @@ foreach ($p in $personas) {
     $ausReales = @($ausDetails | Where-Object { -not $_.Futuro -and -not $_.Justificado } |
         ForEach-Object { [PSCustomObject]@{ Fecha=$_.Fecha; Turno=$_.Turno } })
 
-    # Atrasos entrada
-    $atrasos = @($rowsPresReal | Where-Object { $_.Atraso1 -ne '00:00' -and $_.Atraso1 -ne '' } | ForEach-Object {
-        $min = ParseTime $_.Atraso1
-        [PSCustomObject]@{ Fecha=$_.Fecha; Turno=$_.Turno; Entro=$_.E1; AtrasoStr=$_.Atraso1; AtrasoMin=$min }
-    })
-    $totalAtrasoMin = if ($atrasos.Count -gt 0) { [int]($atrasos | Measure-Object -Property AtrasoMin -Sum).Sum } else { 0 }
-
     # Demora retorno break (Atraso2)
     $demoraBreak = @($rowsPresReal | Where-Object { $_.Atraso2 -ne '00:00' -and $_.Atraso2 -ne '' } | ForEach-Object {
         $min = ParseTime $_.Atraso2
@@ -163,23 +156,34 @@ foreach ($p in $personas) {
         ($_.Estado -like '*largo*') -and $_.Fecha -notmatch '\b(1[5-9]|[2-9]\d)-05-2026\b'
     })
 
-    # Salidas anticipadas (los viernes todos salen 1h antes, descontar 60 min)
-    $adelantos = @($rowsPresReal | ForEach-Object {
-        $a1m = ParseTime $_.Adelanto1; $a2m = ParseTime $_.Adelanto2
-        $best = if ($a2m -ne $null -and $a2m -gt 0) { $a2m } elseif ($a1m -ne $null -and $a1m -gt 0) { $a1m } else { 0 }
-        if ($_.Fecha -match '^Vie\s') { $best = [math]::Max(0, $best - 60) }
-        if ($best -gt 0) {
-            [PSCustomObject]@{ Fecha=$_.Fecha; Turno=$_.Turno; AdelantoStr=(MinToStr $best); AdelantoMin=$best }
+    # ---- DEFICIT DE HORAS (inconsistencia real = horas trabajadas < esperadas) ----
+    # Si entrada-salida cubre las 9h (Lun-Jue) u 8h (Vie), no hay inconsistencia de tiempo
+    $deficitDias = @()
+    foreach ($row in $rowsPresReal) {
+        $entMin  = ParseTime $row.E1
+        $exitMin = if ($row.S2 -ne '') { ParseTime $row.S2 } elseif ($row.S1 -ne '') { ParseTime $row.S1 } else { $null }
+        if ($entMin -eq $null -or $exitMin -eq $null) { continue }
+        $workedMin   = $exitMin - $entMin; if ($workedMin -lt 0) { $workedMin += 1440 }
+        $expectedMin = if ($row.Fecha -match '^Vie\s') { 480 } else { 540 }
+        $deficit     = [math]::Max(0, $expectedMin - $workedMin)
+        if ($deficit -gt 0) {
+            $salidaD = if ($row.S2 -ne '') { $row.S2 } else { $row.S1 }
+            $deficitDias += [PSCustomObject]@{
+                Fecha=$row.Fecha; Turno=$row.Turno
+                Entrada=$row.E1; Salida=$salidaD
+                TrabajadasStr=(MinToStr $workedMin); EsperadasStr=(MinToStr $expectedMin)
+                DeficitMin=$deficit; DeficitStr=(MinToStr $deficit)
+            }
         }
-    } | Where-Object { $_ -ne $null })
-    $totalAdelantoMin = if ($adelantos.Count -gt 0) { [int]($adelantos | Measure-Object -Property AdelantoMin -Sum).Sum } else { 0 }
+    }
+    $totalDeficitMin = if ($deficitDias.Count -gt 0) { [int]($deficitDias | Measure-Object -Property DeficitMin -Sum).Sum } else { 0 }
 
-    $nNovedades = $ausReales.Count + $atrasos.Count + $demoraBreak.Count + $breakExcedido.Count + $adelantos.Count
+    $nNovedades = $ausReales.Count + $deficitDias.Count + $demoraBreak.Count + $breakExcedido.Count
 
     # ---- TOTAL INCONSISTENCIAS (para tabla resumen) ----
-    $demoraBreakTotalMin  = if ($demoraBreak.Count  -gt 0) { [int]($demoraBreak  | Measure-Object -Property DemoraMin  -Sum).Sum } else { 0 }
+    $demoraBreakTotalMin    = if ($demoraBreak.Count  -gt 0) { [int]($demoraBreak | Measure-Object -Property DemoraMin -Sum).Sum } else { 0 }
     $breakExcedidoExcessMin = if ($breakExcedido.Count -gt 0) { [int](($breakExcedido | ForEach-Object { [math]::Max(0, $_.BreakMin - 60) }) | Measure-Object -Sum).Sum } else { 0 }
-    $totalInconsistenciaMin = $totalAtrasoMin + $totalAdelantoMin + $demoraBreakTotalMin + $breakExcedidoExcessMin
+    $totalInconsistenciaMin = $totalDeficitMin + $demoraBreakTotalMin + $breakExcedidoExcessMin
 
     # ---- HORAS EXTRAS ----
     $rowsSabOT = @($data | Where-Object {
@@ -241,9 +245,9 @@ foreach ($p in $personas) {
         AvgBreak=$avgBreak; MaxBreak=$maxBreak; MinBreak=$minBreak
         nBreakOK=$nBreakOK; nBreakLargo=$nBreakLargo; nBreakCorto=$nBreakCorto
         BreakDays=$breakDays
-        AusReales=$ausReales; Atrasos=$atrasos; TotalAtrasoMin=$totalAtrasoMin
+        AusReales=$ausReales
+        DeficitDias=$deficitDias; TotalDeficitMin=$totalDeficitMin
         DemoraBreak=$demoraBreak; BreakExcedido=$breakExcedido
-        Adelantos=$adelantos; TotalAdelantoMin=$totalAdelantoMin
         nNovedades=$nNovedades
         JustifPersona=$justifPersona
         HTDays=$htDays; TotalOT50=$totalOT50; TotalOT100=$totalOT100; TotalOTMin=$totalOTMin
@@ -459,7 +463,7 @@ $html += @'
 '@
 
 $html += "<div style='background:rgba(232,56,61,.08);border:1px solid rgba(232,56,61,.25);border-radius:8px;padding:10px 16px;margin-bottom:16px;font-size:12px;color:var(--text-secondary);'>"
-$html += "&#128203;&nbsp; <strong>Resumen del periodo 01/05 &ndash; 14/05/2026</strong> &nbsp;&#183;&nbsp; Las inconsistencias incluyen atrasos de entrada, salidas anticipadas, demoras en retorno de break y breaks excedidos. Umbral de alerta: <strong style='color:var(--accent)'>15 minutos</strong>.</div>"
+$html += "&#128203;&nbsp; <strong>Resumen del periodo 01/05 &ndash; 14/05/2026</strong> &nbsp;&#183;&nbsp; Inconsistencia = horas que falto trabajar en el dia (entrada-salida vs 9h Lun-Jue / 8h Vie) + demoras en retorno de break + breaks excedidos. Umbral de alerta: <strong style='color:var(--accent)'>15 minutos</strong>.</div>"
 
 $html += "<div class='section-box' style='padding:0;overflow:hidden;margin-bottom:0'>"
 $html += "<table class='resumen-table'>"
@@ -507,20 +511,11 @@ foreach ($g in $grupos) {
         $html += "<tr id='detail_$rsmId' class='resumen-detail' data-group='$g' style='display:none'>"
         $html += "<td colspan='8'><div class='rsm-grid'>"
 
-        if ($per.Atrasos.Count -gt 0) {
+        if ($per.DeficitDias.Count -gt 0) {
             $html += "<div class='rsm-block'>"
-            $html += "<h6 style='color:var(--orange)'>&#128336; Atrasos de entrada &mdash; $(MinToStr $per.TotalAtrasoMin) total</h6>"
-            foreach ($a in $per.Atrasos) {
-                $html += "<div class='rsm-item'><span class='rsm-fecha'>$($a.Fecha)</span><span class='rsm-val' style='color:var(--orange)'>$($a.AtrasoStr)</span></div>"
-            }
-            $html += "</div>"
-        }
-
-        if ($per.Adelantos.Count -gt 0) {
-            $html += "<div class='rsm-block'>"
-            $html += "<h6 style='color:var(--purple)'>&#9194; Salidas anticipadas &mdash; $(MinToStr $per.TotalAdelantoMin) total</h6>"
-            foreach ($a in $per.Adelantos) {
-                $html += "<div class='rsm-item'><span class='rsm-fecha'>$($a.Fecha)</span><span class='rsm-val' style='color:var(--purple)'>$($a.AdelantoStr)</span></div>"
+            $html += "<h6 style='color:var(--orange)'>&#9203; Deficit de horas &mdash; $(MinToStr $per.TotalDeficitMin) total</h6>"
+            foreach ($d in $per.DeficitDias) {
+                $html += "<div class='rsm-item'><span class='rsm-fecha'>$($d.Fecha)</span><span class='rsm-val' style='color:var(--orange)'>-$($d.DeficitStr)</span></div>"
             }
             $html += "</div>"
         }
@@ -793,9 +788,8 @@ foreach ($g in $grupos) {
         if ($per.nNovedades -eq 0) {
             $html += "<span class='pill green'>Sin novedades</span>"
         } else {
-            if ($per.AusReales.Count -gt 0)    { $html += "<span class='pill red'>$($per.AusReales.Count) ausencia$(if($per.AusReales.Count-gt 1){'s'})</span>" }
-            if ($per.Atrasos.Count -gt 0)       { $html += "<span class='pill orange'>$($per.Atrasos.Count) atraso$(if($per.Atrasos.Count-gt 1){'s'}) ($(MinToStr $per.TotalAtrasoMin))</span>" }
-            if ($per.Adelantos.Count -gt 0)     { $html += "<span class='pill purple'>$($per.Adelantos.Count) salida$(if($per.Adelantos.Count-gt 1){'s'}) anticipada$(if($per.Adelantos.Count-gt 1){'s'})</span>" }
+            if ($per.AusReales.Count -gt 0)     { $html += "<span class='pill red'>$($per.AusReales.Count) ausencia$(if($per.AusReales.Count-gt 1){'s'})</span>" }
+            if ($per.DeficitDias.Count -gt 0)   { $html += "<span class='pill orange'>$($per.DeficitDias.Count) dia$(if($per.DeficitDias.Count-gt 1){'s'}) con deficit ($(MinToStr $per.TotalDeficitMin))</span>" }
             if ($per.BreakExcedido.Count -gt 0) { $html += "<span class='pill orange'>$($per.BreakExcedido.Count) break excedido</span>" }
             if ($per.DemoraBreak.Count -gt 0)   { $html += "<span class='pill orange'>$($per.DemoraBreak.Count) demora en retorno</span>" }
         }
@@ -837,35 +831,20 @@ foreach ($g in $grupos) {
         }
         $html += "</div>"
 
-        # ATRASOS
+        # DEFICIT DE HORAS
         $html += "<div class='nov-block'>"
-        $html += "<h5 class='ora-h'>&#128336; Atrasos en entrada ($($per.Atrasos.Count) dias)</h5>"
-        if ($per.Atrasos.Count -eq 0) {
-            $html += "<div class='no-nov'>Sin atrasos registrados</div>"
+        $html += "<h5 class='ora-h'>&#9203; Deficit de horas ($($per.DeficitDias.Count) dias)</h5>"
+        if ($per.DeficitDias.Count -eq 0) {
+            $html += "<div class='no-nov'>Cumplio las horas en todos los dias</div>"
         } else {
-            $html += "<div class='nov-total' style='color:var(--orange)'>$(MinToStr $per.TotalAtrasoMin)</div>"
-            $html += "<div class='nov-sub'>total acumulado en $($per.Atrasos.Count) dia$(if($per.Atrasos.Count-gt 1){'s'})</div>"
-            $html += "<table class='nov-table'><tr><th>Fecha</th><th>Turno</th><th>Entro</th><th>Demora</th></tr>"
-            foreach ($a in $per.Atrasos) {
-                $cls = if ($a.AtrasoMin -ge 60) { "highlight-red" } elseif ($a.AtrasoMin -ge 15) { "highlight-ora" } else { "" }
-                $html += "<tr><td>$($a.Fecha)</td><td>$($a.Turno)</td><td>$($a.Entro)</td><td><span class='$cls'>$($a.AtrasoStr)</span></td></tr>"
-            }
-            $html += "</table>"
-        }
-        $html += "</div>"
-
-        # SALIDAS ANTICIPADAS
-        $html += "<div class='nov-block'>"
-        $html += "<h5 class='pur-h'>&#9194; Salidas anticipadas ($($per.Adelantos.Count) dias)</h5>"
-        if ($per.Adelantos.Count -eq 0) {
-            $html += "<div class='no-nov'>Sin salidas anticipadas</div>"
-        } else {
-            $html += "<div class='nov-total' style='color:var(--purple)'>$(MinToStr $per.TotalAdelantoMin)</div>"
-            $html += "<div class='nov-sub'>tiempo anticipado en $($per.Adelantos.Count) dia$(if($per.Adelantos.Count-gt 1){'s'})</div>"
-            $html += "<table class='nov-table'><tr><th>Fecha</th><th>Turno</th><th>Se fue antes</th></tr>"
-            foreach ($a in $per.Adelantos) {
-                $cls = if ($a.AdelantoMin -ge 60) { "highlight-red" } elseif ($a.AdelantoMin -ge 30) { "highlight-ora" } else { "highlight-pur" }
-                $html += "<tr><td>$($a.Fecha)</td><td>$($a.Turno)</td><td><span class='$cls'>$($a.AdelantoStr)</span></td></tr>"
+            $html += "<div class='nov-total' style='color:var(--orange)'>$(MinToStr $per.TotalDeficitMin)</div>"
+            $html += "<div class='nov-sub'>tiempo faltante en $($per.DeficitDias.Count) dia$(if($per.DeficitDias.Count-gt 1){'s'}) (9h Lun-Jue / 8h Vie)</div>"
+            $html += "<table class='nov-table'><tr><th>Fecha</th><th>Entro</th><th>Salio</th><th>Trabajo</th><th>Esperado</th><th>Faltaron</th></tr>"
+            foreach ($d in $per.DeficitDias) {
+                $cls = if ($d.DeficitMin -ge 60) { "highlight-red" } elseif ($d.DeficitMin -ge 15) { "highlight-ora" } else { "" }
+                $html += "<tr><td>$($d.Fecha)</td><td>$($d.Entrada)</td><td>$($d.Salida)</td>"
+                $html += "<td>$($d.TrabajadasStr)</td><td>$($d.EsperadasStr)</td>"
+                $html += "<td><span class='$cls'>$($d.DeficitStr)</span></td></tr>"
             }
             $html += "</table>"
         }
