@@ -118,10 +118,14 @@ $justificaciones = @(
     }
 )
 
+# Empleados con turno de 8h Lun-Jue y 7h Vie (en vez de 9h/8h estandar)
+$turnoCortoApellidos = @('PENIDA','COTUGNO','SANDOVAL','KAPP','CACERES')
+
 $allPersonas = @()
 foreach ($p in $personas) {
     $pts = $p -split '\|'
     $apell = $pts[0]; $nom = $pts[1]; $grp = $pts[2]
+    $esTurnoCorto = ($turnoCortoApellidos | Where-Object { $apell -like "*$_*" }).Count -gt 0
     $rows = $dataWD | Where-Object { $_.Apellidos -eq $apell -and $_.Nombre -eq $nom }
 
     # Asistencia
@@ -202,14 +206,19 @@ foreach ($p in $personas) {
     })
 
     # ---- DEFICIT DE HORAS (inconsistencia real = horas trabajadas < esperadas) ----
-    # Si entrada-salida cubre las 9h (Lun-Jue) u 8h (Vie), no hay inconsistencia de tiempo
+    # Turno corto (PENIDA/COTUGNO/SANDOVAL/KAPP/CACERES): 8h Lun-Jue, 7h Vie
+    # Resto: 9h Lun-Jue, 8h Vie
     $deficitDias = @()
     foreach ($row in $rowsPresReal) {
         $entMin  = ParseTime $row.E1
         $exitMin = if ($row.S2 -ne '') { ParseTime $row.S2 } elseif ($row.S1 -ne '') { ParseTime $row.S1 } else { $null }
         if ($entMin -eq $null -or $exitMin -eq $null) { continue }
         $workedMin   = $exitMin - $entMin; if ($workedMin -lt 0) { $workedMin += 1440 }
-        $expectedMin = if ($row.Fecha -match '^Vie\s') { 480 } else { 540 }
+        $expectedMin = if ($esTurnoCorto) {
+            if ($row.Fecha -match '^Vie\s') { 420 } else { 480 }
+        } else {
+            if ($row.Fecha -match '^Vie\s') { 480 } else { 540 }
+        }
         $deficit     = [math]::Max(0, $expectedMin - $workedMin)
         if ($deficit -gt 0) {
             $salidaD = if ($row.S2 -ne '') { $row.S2 } else { $row.S1 }
@@ -240,14 +249,18 @@ foreach ($p in $personas) {
 
     $htDays = @()
 
-    # Lun-Vie: horas trabajadas (entrada->salida) vs esperadas (9h Lun-Jue, 8h Vie) -> 50%
+    # Lun-Vie: horas trabajadas (entrada->salida) vs esperadas -> 50%
     foreach ($row in $rowsPresReal) {
         $entMin  = ParseTime $row.E1
         $exitMin = if ($row.S2 -ne '') { ParseTime $row.S2 } elseif ($row.S1 -ne '') { ParseTime $row.S1 } else { $null }
         if ($entMin -eq $null -or $exitMin -eq $null) { continue }
         $workedMin   = $exitMin - $entMin
         if ($workedMin -lt 0) { $workedMin += 1440 }
-        $expectedMin = if ($row.Fecha -match '^Vie\s') { 480 } else { 540 }
+        $expectedMin = if ($esTurnoCorto) {
+            if ($row.Fecha -match '^Vie\s') { 420 } else { 480 }
+        } else {
+            if ($row.Fecha -match '^Vie\s') { 480 } else { 540 }
+        }
         $otMin = [math]::Max(0, $workedMin - $expectedMin)
         if ($otMin -ge 30) {
             $salidaStr = if ($row.S2 -ne '') { $row.S2 } else { $row.S1 }
@@ -883,7 +896,8 @@ foreach ($g in $grupos) {
             $html += "<div class='no-nov'>Cumplio las horas en todos los dias</div>"
         } else {
             $html += "<div class='nov-total' style='color:var(--orange)'>$(MinToStr $per.TotalDeficitMin)</div>"
-            $html += "<div class='nov-sub'>tiempo faltante en $($per.DeficitDias.Count) dia$(if($per.DeficitDias.Count-gt 1){'s'}) (9h Lun-Jue / 8h Vie)</div>"
+            $turnoDesc = if ($esTurnoCorto) { "8h Lun-Jue / 7h Vie" } else { "9h Lun-Jue / 8h Vie" }
+            $html += "<div class='nov-sub'>tiempo faltante en $($per.DeficitDias.Count) dia$(if($per.DeficitDias.Count-gt 1){'s'}) ($turnoDesc)</div>"
             $html += "<table class='nov-table'><tr><th>Fecha</th><th>Entro</th><th>Salio</th><th>Trabajo</th><th>Esperado</th><th>Faltaron</th></tr>"
             foreach ($d in $per.DeficitDias) {
                 $cls = if ($d.DeficitMin -ge 60) { "highlight-red" } elseif ($d.DeficitMin -ge 15) { "highlight-ora" } else { "" }
