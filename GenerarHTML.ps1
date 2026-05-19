@@ -110,11 +110,11 @@ $justificaciones = @(
     },
     [PSCustomObject]@{
         Apellidos  = 'Pittala'
-        ISODesde   = '2026-04-13'
+        ISODesde   = '2026-04-08'
         ISOHasta   = '2026-04-13'
-        DispDesde  = '13/04'
+        DispDesde  = '08/04'
         DispHasta  = '13/04/2026'
-        Motivo     = 'Falla en lector de fichadas (ingreso correctamente)'
+        Motivo     = 'Falla en lector de fichadas (ingreso correctamente todos los dias)'
         Icono      = '&#128274;'
     }
 )
@@ -123,7 +123,7 @@ $justificaciones = @(
 $turnoCortoApellidos = @('PENIDA','COTUGNO','SANDOVAL','KAPP','CACERES')
 
 # Empleados cuyas inconsistencias son por fichada faltante (no deficit real) -> se fuerza a 0
-$sinInconsistencias = @('DEMARCHIS','CAÑETE')
+$sinInconsistencias = @('DEMARCHIS','CAÑETE','Pittala')
 
 $allPersonas = @()
 foreach ($p in $personas) {
