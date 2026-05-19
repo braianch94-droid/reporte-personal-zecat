@@ -65,11 +65,47 @@ $justificaciones = @(
     [PSCustomObject]@{
         Apellidos  = 'DEMARCHIS'
         ISODesde   = '2026-04-08'
-        ISOHasta   = '2026-04-10'
+        ISOHasta   = '2026-04-14'
         DispDesde  = '08/04'
-        DispHasta  = '10/04/2026'
+        DispHasta  = '14/04/2026'
         Motivo     = 'Viaje a Chile'
         Icono      = '&#9992;'
+    },
+    [PSCustomObject]@{
+        Apellidos  = 'MARTINEZ'
+        ISODesde   = '2026-04-08'
+        ISOHasta   = '2026-04-30'
+        DispDesde  = '08/04'
+        DispHasta  = '30/04/2026'
+        Motivo     = 'Sin dispositivo de fichada (vino todos los dias)'
+        Icono      = '&#128274;'
+    },
+    [PSCustomObject]@{
+        Apellidos  = 'BRUN'
+        ISODesde   = '2026-04-21'
+        ISOHasta   = '2026-04-21'
+        DispDesde  = '21/04'
+        DispHasta  = '21/04/2026'
+        Motivo     = 'Certificado medico (dolor de muela)'
+        Icono      = '&#127973;'
+    },
+    [PSCustomObject]@{
+        Apellidos  = 'CAÑETE'
+        ISODesde   = '2026-04-23'
+        ISOHasta   = '2026-04-24'
+        DispDesde  = '23/04'
+        DispHasta  = '24/04/2026'
+        Motivo     = 'Falla en lector de fichadas'
+        Icono      = '&#128274;'
+    },
+    [PSCustomObject]@{
+        Apellidos  = 'OCAMPO'
+        ISODesde   = '2026-04-08'
+        ISOHasta   = '2026-04-30'
+        DispDesde  = '08/04'
+        DispHasta  = '30/04/2026'
+        Motivo     = 'Falla en lector de fichadas (vino todos los dias)'
+        Icono      = '&#128274;'
     }
 )
 
