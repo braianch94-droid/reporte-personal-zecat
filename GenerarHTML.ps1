@@ -9,10 +9,15 @@ function MinToStr([int]$min) {
 }
 function ToJson([string]$s) { return $s -replace "'","\\'" -replace '"','\"' }
 function ParseTurnoEnd([string]$turno) {
-    # Extrae todas las horas HH:MM y devuelve la ultima (fin de turno)
-    # Soporta "08:00 a 17:00" y "08:00 - 17:00(60 mins)"
     $times = [regex]::Matches($turno, '\d{1,2}:\d{2}')
     if ($times.Count -ge 2) { return ParseTime $times[$times.Count - 1].Value }
+    return $null
+}
+function GetFechaDate([string]$fecha) {
+    $m = [regex]::Match($fecha, '\d{2}-\d{2}-\d{4}')
+    if ($m.Success) {
+        try { return [datetime]::ParseExact($m.Value, 'dd-MM-yyyy', $null) } catch { return $null }
+    }
     return $null
 }
 
@@ -38,6 +43,13 @@ for ($r = 3; $r -le $totalRows; $r++) {
 $srcWb.Close($false); $xl.Quit()
 $data = @($data | Where-Object { $_.Apellidos -notlike '*AIRALA*' })
 
+# Solo tomar datos a partir del 08/04/2026
+$startDate = [datetime]::ParseExact('08-04-2026', 'dd-MM-yyyy', $null)
+$data = @($data | Where-Object {
+    $fd = GetFechaDate $_.Fecha
+    $fd -eq $null -or $fd -ge $startDate
+})
+
 $dataWD = $data | Where-Object {
     $f = $_.Fecha
     ($f -match '^Lun\s' -or $f -match '^Mar\s' -or $f -match '^Mi' -or $f -match '^Jue\s' -or $f -match '^Vie\s')
@@ -48,6 +60,17 @@ $personas = $dataWD | ForEach-Object { "$($_.Apellidos)|$($_.Nombre)|$($_.Grupo)
 # ---- FERIADOS CONOCIDOS (agregar fechas en formato dd-MM-yyyy) ----
 $feriadosFechas = @('02-04-2026', '03-04-2026')
 $feriadosPattern = ($feriadosFechas | ForEach-Object { [regex]::Escape($_) }) -join '|'
+
+# ---- JUSTIFICACIONES / VIAJES (no cuentan como ausencia real) ----
+$justificaciones = @(
+    [PSCustomObject]@{
+        Apellidos  = 'DEMARCHIS'
+        FechaDesde = [datetime]::ParseExact('08-04-2026', 'dd-MM-yyyy', $null)
+        FechaHasta = [datetime]::ParseExact('10-04-2026', 'dd-MM-yyyy', $null)
+        Motivo     = 'Viaje a Chile'
+        Icono      = '&#9992;'
+    }
+)
 
 $allPersonas = @()
 foreach ($p in $personas) {
@@ -60,15 +83,27 @@ foreach ($p in $personas) {
     $nDescanso  = [int](@($rows | Where-Object { $_.Turno -eq 'Descanso' -and $_.Fecha -notmatch '\(F\)' -and ($feriadosPattern -eq '' -or $_.Fecha -notmatch $feriadosPattern) }).Count)
     $rowsLab    = @($rows | Where-Object { $_.Turno -ne 'Descanso' -and $_.Fecha -notmatch '\(F\)' -and ($feriadosPattern -eq '' -or $_.Fecha -notmatch $feriadosPattern) })
     $nLab       = [int]$rowsLab.Count
-    # Presente = cualquier fichada registrada (entrada O salida), no solo E1
-    $nPresente  = [int](@($rowsLab | Where-Object { $_.E1 -ne '' -or $_.S1 -ne '' -or $_.E2 -ne '' -or $_.S2 -ne '' }).Count)
-    $nAusente   = [int](@($rowsLab | Where-Object { $_.E1 -eq '' -and $_.S1 -eq '' -and $_.E2 -eq '' -and $_.S2 -eq '' }).Count)
-    $pct        = if ($nLab -gt 0) { [math]::Round($nPresente/$nLab*100,1) } else { 0 }
 
+    # Justificaciones para esta persona (viajes, etc)
+    $justifPersona = @($justificaciones | Where-Object { $apell -like "*$($_.Apellidos)*" })
+
+    # Calcular ausDetails con flag Justificado (antes de nPresente para poder usarlo)
     $ausDetails = @($rowsLab | Where-Object { $_.E1 -eq '' -and $_.S1 -eq '' -and $_.E2 -eq '' -and $_.S2 -eq '' } | ForEach-Object {
-        $isFut = $_.Fecha -match '\b(1[5-9]|[2-9]\d)-05-2026\b'
-        [PSCustomObject]@{ Fecha=$_.Fecha; Turno=$_.Turno; Futuro=$isFut }
+        $rowF = $_.Fecha; $rowT = $_.Turno
+        $isFut    = $rowF -match '\b(1[5-9]|[2-9]\d)-05-2026\b'
+        $fd       = GetFechaDate $rowF
+        $jMatch   = if ($fd -ne $null -and $justifPersona.Count -gt 0) {
+            $justifPersona | Where-Object { $fd -ge $_.FechaDesde -and $fd -le $_.FechaHasta } | Select-Object -First 1
+        } else { $null }
+        $isJustif = $jMatch -ne $null
+        [PSCustomObject]@{ Fecha=$rowF; Turno=$rowT; Futuro=$isFut; Justificado=$isJustif; Motivo=if($isJustif){$jMatch.Motivo}else{''} }
     })
+
+    # Presente = cualquier fichada O dia justificado
+    $nJustif   = [int](@($ausDetails | Where-Object { $_.Justificado }).Count)
+    $nPresente = [int](@($rowsLab | Where-Object { $_.E1 -ne '' -or $_.S1 -ne '' -or $_.E2 -ne '' -or $_.S2 -ne '' }).Count) + $nJustif
+    $nAusente  = [int](@($rowsLab | Where-Object { $_.E1 -eq '' -and $_.S1 -eq '' -and $_.E2 -eq '' -and $_.S2 -eq '' }).Count) - $nJustif
+    $pct       = if ($nLab -gt 0) { [math]::Round($nPresente/$nLab*100,1) } else { 0 }
 
     # Breaks
     $rowsConBreak = @($rowsLab | Where-Object { $_.E1 -ne '' -and $_.S1 -ne '' -and $_.E2 -ne '' })
@@ -105,10 +140,9 @@ foreach ($p in $personas) {
     # ---- NOVEDADES ----
     $rowsPresReal = @($rowsLab | Where-Object { ($_.E1 -ne '' -or $_.S1 -ne '' -or $_.E2 -ne '' -or $_.S2 -ne '') -and $_.Fecha -notmatch '\b(1[5-9]|[2-9]\d)-05-2026\b' })
 
-    # Ausencias reales (no futuras, sin ninguna fichada)
-    $ausReales = @($rowsLab | Where-Object {
-        $_.E1 -eq '' -and $_.S1 -eq '' -and $_.E2 -eq '' -and $_.S2 -eq '' -and $_.Fecha -notmatch '\b(1[5-9]|[2-9]\d)-05-2026\b'
-    } | ForEach-Object { [PSCustomObject]@{ Fecha=$_.Fecha; Turno=$_.Turno } })
+    # Ausencias reales (no futuras, sin fichada, sin justificacion)
+    $ausReales = @($ausDetails | Where-Object { -not $_.Futuro -and -not $_.Justificado } |
+        ForEach-Object { [PSCustomObject]@{ Fecha=$_.Fecha; Turno=$_.Turno } })
 
     # Atrasos entrada
     $atrasos = @($rowsPresReal | Where-Object { $_.Atraso1 -ne '00:00' -and $_.Atraso1 -ne '' } | ForEach-Object {
@@ -210,6 +244,7 @@ foreach ($p in $personas) {
         DemoraBreak=$demoraBreak; BreakExcedido=$breakExcedido
         Adelantos=$adelantos; TotalAdelantoMin=$totalAdelantoMin
         nNovedades=$nNovedades
+        JustifPersona=$justifPersona
         HTDays=$htDays; TotalOT50=$totalOT50; TotalOT100=$totalOT100; TotalOTMin=$totalOTMin
         TotalInconsistenciaMin=$totalInconsistenciaMin
     }
@@ -584,10 +619,13 @@ foreach ($g in $grupos) {
         } else {
             $html += "<table><tr><th>Fecha</th><th>Turno</th><th>Estado</th></tr>"
             foreach ($a in $per.AusDetails) {
-                $cls = if ($a.Futuro) { "future" } else { "" }
-                $lbl = if ($a.Futuro) { "Pendiente" } else { "AUSENTE" }
-                $style = if (-not $a.Futuro) { "style='color:var(--red);font-weight:700'" } else { "" }
-                $html += "<tr class='$cls'><td>$($a.Fecha)</td><td>$($a.Turno)</td><td $style>$lbl</td></tr>"
+                if ($a.Justificado) {
+                    $html += "<tr><td>$($a.Fecha)</td><td>$($a.Turno)</td><td style='color:var(--green);font-weight:700'>&#9992; $($a.Motivo)</td></tr>"
+                } elseif ($a.Futuro) {
+                    $html += "<tr class='future'><td>$($a.Fecha)</td><td>$($a.Turno)</td><td>Pendiente</td></tr>"
+                } else {
+                    $html += "<tr><td>$($a.Fecha)</td><td>$($a.Turno)</td><td style='color:var(--red);font-weight:700'>AUSENTE</td></tr>"
+                }
             }
             $html += "</table>"
         }
@@ -763,6 +801,27 @@ foreach ($g in $grupos) {
         $html += "</div>"  # nov-header
 
         $html += "<div class='nov-body'><div class='nov-grid'>"
+
+        # JUSTIFICACIONES / VIAJES
+        if ($per.JustifPersona.Count -gt 0) {
+            $html += "<div class='nov-block'>"
+            $html += "<h5 style='color:var(--green)'>&#9992; Justificaciones ($($per.JustifPersona.Count))</h5>"
+            foreach ($j in $per.JustifPersona) {
+                $diasJustif = @($per.AusDetails | Where-Object { $_.Justificado -and $_.Motivo -eq $j.Motivo })
+                $html += "<div class='nov-total' style='color:var(--green)'>$($j.Motivo)</div>"
+                $html += "<div class='nov-sub'>$($j.FechaDesde.ToString('dd/MM')) al $($j.FechaHasta.ToString('dd/MM/yyyy'))</div>"
+                if ($diasJustif.Count -gt 0) {
+                    $html += "<table class='nov-table' style='margin-top:8px'><tr><th>Fecha</th><th>Turno</th><th>Motivo</th></tr>"
+                    foreach ($d in $diasJustif) {
+                        $html += "<tr><td>$($d.Fecha)</td><td>$($d.Turno)</td><td style='color:var(--green)'>&#9992; $($d.Motivo)</td></tr>"
+                    }
+                    $html += "</table>"
+                } else {
+                    $html += "<div style='font-size:11px;color:var(--text-muted);margin-top:4px'>No hay dias sin fichada en ese rango.</div>"
+                }
+            }
+            $html += "</div>"
+        }
 
         # AUSENCIAS
         $html += "<div class='nov-block'>"
