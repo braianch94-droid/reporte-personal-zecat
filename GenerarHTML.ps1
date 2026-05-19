@@ -45,6 +45,10 @@ $dataWD = $data | Where-Object {
 
 $personas = $dataWD | ForEach-Object { "$($_.Apellidos)|$($_.Nombre)|$($_.Grupo)" } | Sort-Object -Unique
 
+# ---- FERIADOS CONOCIDOS (agregar fechas en formato dd-MM-yyyy) ----
+$feriadosFechas = @('02-04-2026', '03-04-2026')
+$feriadosPattern = ($feriadosFechas | ForEach-Object { [regex]::Escape($_) }) -join '|'
+
 $allPersonas = @()
 foreach ($p in $personas) {
     $pts = $p -split '\|'
@@ -210,10 +214,6 @@ foreach ($p in $personas) {
         TotalInconsistenciaMin=$totalInconsistenciaMin
     }
 }
-
-# ---- FERIADOS CONOCIDOS (agregar fechas en formato dd-MM-yyyy) ----
-$feriadosFechas = @('02-04-2026', '03-04-2026')
-$feriadosPattern = ($feriadosFechas | ForEach-Object { [regex]::Escape($_) }) -join '|'
 
 $grupos = $allPersonas | ForEach-Object { $_.Grupo } | Sort-Object -Unique
 $generadoEn = Get-Date -Format "dd/MM/yyyy HH:mm"
