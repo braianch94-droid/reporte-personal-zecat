@@ -106,6 +106,15 @@ $justificaciones = @(
         DispHasta  = '30/04/2026'
         Motivo     = 'Falla en lector de fichadas (vino todos los dias)'
         Icono      = '&#128274;'
+    },
+    [PSCustomObject]@{
+        Apellidos  = 'Pittala'
+        ISODesde   = '2026-04-13'
+        ISOHasta   = '2026-04-13'
+        DispDesde  = '13/04'
+        DispHasta  = '13/04/2026'
+        Motivo     = 'Falla en lector de fichadas (ingreso correctamente)'
+        Icono      = '&#128274;'
     }
 )
 
