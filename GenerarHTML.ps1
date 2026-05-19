@@ -531,8 +531,11 @@ $html += @'
 </style>
 '@
 
-$html += "<div style='background:rgba(232,56,61,.08);border:1px solid rgba(232,56,61,.25);border-radius:8px;padding:10px 16px;margin-bottom:16px;font-size:12px;color:var(--text-secondary);'>"
-$html += "&#128203;&nbsp; <strong>Resumen del periodo 01/05 &ndash; 14/05/2026</strong> &nbsp;&#183;&nbsp; Inconsistencia = horas que falto trabajar en el dia (entrada-salida vs 9h Lun-Jue / 8h Vie) + demoras en retorno de break + breaks excedidos. Umbral de alerta: <strong style='color:var(--accent)'>15 minutos</strong>.</div>"
+$html += "<div style='display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:16px;'>"
+$html += "<div style='background:rgba(232,56,61,.08);border:1px solid rgba(232,56,61,.25);border-radius:8px;padding:10px 16px;font-size:12px;color:var(--text-secondary);flex:1;min-width:250px;'>"
+$html += "&#128203;&nbsp; <strong>Resumen del periodo 08/04 &ndash; 30/04/2026</strong> &nbsp;&#183;&nbsp; Inconsistencia = horas que falto trabajar en el dia + demoras en retorno de break + breaks excedidos. Umbral de alerta: <strong style='color:var(--accent)'>15 minutos</strong>.</div>"
+$html += "<button onclick='exportarResumen()' style='display:flex;align-items:center;gap:8px;padding:9px 20px;background:var(--green);color:#000;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;'>&#11015; Exportar Excel</button>"
+$html += "</div>"
 
 $html += "<div class='section-box' style='padding:0;overflow:hidden;margin-bottom:0'>"
 $html += "<table class='resumen-table'>"
@@ -1065,6 +1068,30 @@ function filterGroup(group, btn) {
     document.querySelectorAll('tr[data-group]').forEach(function(r){
         r.style.display = (group === 'all' || r.dataset.group === group) ? '' : 'none';
     });
+}
+function exportarResumen() {
+    var rows = document.querySelectorAll('.resumen-table tbody tr.rsm-row');
+    var csv = '﻿'; // BOM para que Excel abra bien en español
+    csv += 'N°;Apellido y Nombre;Grupo;Dias Laborales;Presentes;100% Asistencia;Inconsistencias;Estado\n';
+    rows.forEach(function(row) {
+        if (row.style.display === 'none') return;
+        var cols = row.querySelectorAll('td');
+        var num    = cols[0].innerText.trim();
+        var nombre = cols[1].innerText.replace('▶','').trim();
+        var grupo  = cols[2].innerText.trim();
+        var diasL  = cols[3].innerText.trim();
+        var pres   = cols[4].innerText.trim();
+        var asist  = cols[5].querySelector('.check-ok') ? 'SI' : 'NO';
+        var incons = cols[6].innerText.trim();
+        var estado = cols[7].querySelector('.check-ok') ? 'OK' : 'X';
+        csv += [num,nombre,grupo,diasL,pres,asist,incons,estado].join(';') + '\n';
+    });
+    var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    var url  = URL.createObjectURL(blob);
+    var a    = document.createElement('a');
+    a.href = url; a.download = 'Resumen_Personal_Abril2026.csv';
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
 }
 function toggleAll() {
     allExpanded = !allExpanded;
