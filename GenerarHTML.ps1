@@ -92,9 +92,9 @@ $justificaciones = @(
     [PSCustomObject]@{
         Apellidos  = 'CAÑETE'
         ISODesde   = '2026-04-23'
-        ISOHasta   = '2026-04-24'
+        ISOHasta   = '2026-04-27'
         DispDesde  = '23/04'
-        DispHasta  = '24/04/2026'
+        DispHasta  = '27/04/2026'
         Motivo     = 'Falla en lector de fichadas'
         Icono      = '&#128274;'
     },
