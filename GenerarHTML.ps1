@@ -42,11 +42,12 @@ for ($r = 3; $r -le $totalRows; $r++) {
 $srcWb.Close($false); $xl.Quit()
 $data = @($data | Where-Object { $_.Apellidos -notlike '*AIRALA*' })
 
-# Solo tomar datos a partir del 08/04/2026
+# Rango del periodo: desde 08/04/2026 hasta 30/04/2026
 $startISO = '2026-04-08'
+$endISO   = '2026-04-30'
 $data = @($data | Where-Object {
     $iso = GetFechaISO $_.Fecha
-    $iso -eq '' -or $iso -ge $startISO
+    $iso -eq '' -or ($iso -ge $startISO -and $iso -le $endISO)
 })
 
 $dataWD = $data | Where-Object {
