@@ -52,15 +52,16 @@ foreach ($p in $personas) {
     $rows = $dataWD | Where-Object { $_.Apellidos -eq $apell -and $_.Nombre -eq $nom }
 
     # Asistencia
-    $nFeriado   = [int](@($rows | Where-Object { $_.Fecha -match '\(F\)' }).Count)
-    $nDescanso  = [int](@($rows | Where-Object { $_.Turno -eq 'Descanso' -and $_.Fecha -notmatch '\(F\)' }).Count)
-    $rowsLab    = @($rows | Where-Object { $_.Turno -ne 'Descanso' -and $_.Fecha -notmatch '\(F\)' })
+    $nFeriado   = [int](@($rows | Where-Object { $_.Fecha -match '\(F\)' -or ($feriadosPattern -ne '' -and $_.Fecha -match $feriadosPattern) }).Count)
+    $nDescanso  = [int](@($rows | Where-Object { $_.Turno -eq 'Descanso' -and $_.Fecha -notmatch '\(F\)' -and ($feriadosPattern -eq '' -or $_.Fecha -notmatch $feriadosPattern) }).Count)
+    $rowsLab    = @($rows | Where-Object { $_.Turno -ne 'Descanso' -and $_.Fecha -notmatch '\(F\)' -and ($feriadosPattern -eq '' -or $_.Fecha -notmatch $feriadosPattern) })
     $nLab       = [int]$rowsLab.Count
-    $nPresente  = [int](@($rowsLab | Where-Object { $_.E1 -ne '' }).Count)
-    $nAusente   = [int](@($rowsLab | Where-Object { $_.E1 -eq '' }).Count)
+    # Presente = cualquier fichada registrada (entrada O salida), no solo E1
+    $nPresente  = [int](@($rowsLab | Where-Object { $_.E1 -ne '' -or $_.S1 -ne '' -or $_.E2 -ne '' -or $_.S2 -ne '' }).Count)
+    $nAusente   = [int](@($rowsLab | Where-Object { $_.E1 -eq '' -and $_.S1 -eq '' -and $_.E2 -eq '' -and $_.S2 -eq '' }).Count)
     $pct        = if ($nLab -gt 0) { [math]::Round($nPresente/$nLab*100,1) } else { 0 }
 
-    $ausDetails = @($rowsLab | Where-Object { $_.E1 -eq '' } | ForEach-Object {
+    $ausDetails = @($rowsLab | Where-Object { $_.E1 -eq '' -and $_.S1 -eq '' -and $_.E2 -eq '' -and $_.S2 -eq '' } | ForEach-Object {
         $isFut = $_.Fecha -match '\b(1[5-9]|[2-9]\d)-05-2026\b'
         [PSCustomObject]@{ Fecha=$_.Fecha; Turno=$_.Turno; Futuro=$isFut }
     })
@@ -98,11 +99,11 @@ foreach ($p in $personas) {
     $nBreakCorto = [int](@($breakDays | Where-Object { $_.Estado -like '*corto*' -or $_.Estado -eq 'sin-break' }).Count)
 
     # ---- NOVEDADES ----
-    $rowsPresReal = @($rowsLab | Where-Object { $_.E1 -ne '' -and $_.Fecha -notmatch '\b(1[5-9]|[2-9]\d)-05-2026\b' })
+    $rowsPresReal = @($rowsLab | Where-Object { ($_.E1 -ne '' -or $_.S1 -ne '' -or $_.E2 -ne '' -or $_.S2 -ne '') -and $_.Fecha -notmatch '\b(1[5-9]|[2-9]\d)-05-2026\b' })
 
-    # Ausencias reales (no futuras)
+    # Ausencias reales (no futuras, sin ninguna fichada)
     $ausReales = @($rowsLab | Where-Object {
-        $_.E1 -eq '' -and $_.Fecha -notmatch '\b(1[5-9]|[2-9]\d)-05-2026\b'
+        $_.E1 -eq '' -and $_.S1 -eq '' -and $_.E2 -eq '' -and $_.S2 -eq '' -and $_.Fecha -notmatch '\b(1[5-9]|[2-9]\d)-05-2026\b'
     } | ForEach-Object { [PSCustomObject]@{ Fecha=$_.Fecha; Turno=$_.Turno } })
 
     # Atrasos entrada
@@ -136,10 +137,16 @@ foreach ($p in $personas) {
 
     $nNovedades = $ausReales.Count + $atrasos.Count + $demoraBreak.Count + $breakExcedido.Count + $adelantos.Count
 
+    # ---- TOTAL INCONSISTENCIAS (para tabla resumen) ----
+    $demoraBreakTotalMin  = if ($demoraBreak.Count  -gt 0) { [int]($demoraBreak  | Measure-Object -Property DemoraMin  -Sum).Sum } else { 0 }
+    $breakExcedidoExcessMin = if ($breakExcedido.Count -gt 0) { [int](($breakExcedido | ForEach-Object { [math]::Max(0, $_.BreakMin - 60) }) | Measure-Object -Sum).Sum } else { 0 }
+    $totalInconsistenciaMin = $totalAtrasoMin + $totalAdelantoMin + $demoraBreakTotalMin + $breakExcedidoExcessMin
+
     # ---- HORAS EXTRAS ----
     $rowsSabOT = @($data | Where-Object {
         $_.Apellidos -eq $apell -and $_.Nombre -eq $nom -and
-        $_.Fecha -match '^S' -and $_.E1 -ne '' -and
+        $_.Fecha -match '^S' -and
+        ($_.E1 -ne '' -or $_.S1 -ne '' -or $_.E2 -ne '' -or $_.S2 -ne '') -and
         $_.Fecha -notmatch '\b(1[5-9]|[2-9]\d)-05-2026\b'
     })
 
@@ -200,8 +207,13 @@ foreach ($p in $personas) {
         Adelantos=$adelantos; TotalAdelantoMin=$totalAdelantoMin
         nNovedades=$nNovedades
         HTDays=$htDays; TotalOT50=$totalOT50; TotalOT100=$totalOT100; TotalOTMin=$totalOTMin
+        TotalInconsistenciaMin=$totalInconsistenciaMin
     }
 }
+
+# ---- FERIADOS CONOCIDOS (agregar fechas en formato dd-MM-yyyy) ----
+$feriadosFechas = @('02-04-2026', '03-04-2026')
+$feriadosPattern = ($feriadosFechas | ForEach-Object { [regex]::Escape($_) }) -join '|'
 
 $grupos = $allPersonas | ForEach-Object { $_.Grupo } | Sort-Object -Unique
 $generadoEn = Get-Date -Format "dd/MM/yyyy HH:mm"
@@ -351,7 +363,8 @@ $html = @'
 </div>
 
 <div class="main-tabs">
-  <div class="main-tab active" onclick="switchTab('asistencia')">&#128197; Asistencia</div>
+  <div class="main-tab active" onclick="switchTab('resumen')">&#128203; Resumen</div>
+  <div class="main-tab" onclick="switchTab('asistencia')">&#128197; Asistencia</div>
   <div class="main-tab" onclick="switchTab('descansos')">&#9200; Descansos y Almuerzo</div>
   <div class="main-tab" onclick="switchTab('novedades')">&#9888; Novedades e Inconsistencias</div>
   <div class="main-tab" onclick="switchTab('horasextras')">&#9201; Horas Extras</div>
@@ -374,8 +387,149 @@ $html += @'
 <div class="content">
 '@
 
+# ==========================================
+# TAB RESUMEN
+# ==========================================
+$html += '<div id="tab-resumen" class="tab-panel active">'
+$html += @'
+<style>
+  .resumen-table { width:100%; border-collapse:collapse; font-size:13px; }
+  .resumen-table th { background:#0d0e10; color:var(--text-secondary); padding:10px 14px; text-align:left; font-size:10px; text-transform:uppercase; letter-spacing:.6px; border-bottom:2px solid var(--border); }
+  .resumen-table th.tc { text-align:center; }
+  .resumen-table td { padding:9px 14px; border-bottom:1px solid var(--border); color:var(--text-primary); vertical-align:middle; }
+  .resumen-table tr:last-child td { border-bottom:none; }
+  .resumen-table .tc { text-align:center; }
+  .resumen-table .td-name { font-weight:700; }
+  .resumen-table .td-grupo { color:var(--text-muted); font-size:11px; }
+  .resumen-group-row td { background:#0d0e10; color:var(--text-secondary); font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:1px; padding:7px 14px; border-left:3px solid var(--accent); }
+  .check-ok  { color:var(--green);  font-size:16px; font-weight:700; }
+  .check-bad { color:var(--red);    font-size:16px; font-weight:700; }
+  .num-circle { display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; border-radius:50%; background:var(--bg-inner); color:var(--text-muted); font-size:11px; font-weight:700; border:1px solid var(--border-light); }
+  .incons-ok  { color:var(--green); font-weight:700; }
+  .incons-bad { color:var(--red);   font-weight:700; }
+  .rsm-row { cursor:pointer; user-select:none; }
+  .rsm-row:hover td { background:rgba(255,255,255,.05) !important; }
+  .rsm-chevron { display:inline-block; transition:transform .22s; margin-right:7px; font-size:10px; color:var(--text-muted); }
+  .rsm-row.open .rsm-chevron { transform:rotate(90deg); }
+  .resumen-detail td { background:var(--bg-inner) !important; padding:14px 16px !important; border-bottom:2px solid var(--border) !important; }
+  .rsm-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:10px; }
+  .rsm-block { background:var(--bg-card); border:1px solid var(--border); border-radius:6px; padding:10px 12px; }
+  .rsm-block h6 { font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; margin-bottom:7px; padding-bottom:5px; border-bottom:1px solid var(--border); }
+  .rsm-item { display:flex; justify-content:space-between; align-items:center; font-size:12px; padding:3px 0; color:var(--text-secondary); border-bottom:1px solid var(--border); }
+  .rsm-item:last-child { border-bottom:none; }
+  .rsm-item .rsm-fecha { color:var(--text-primary); }
+  .rsm-item .rsm-val { font-weight:700; }
+</style>
+'@
+
+$html += "<div style='background:rgba(232,56,61,.08);border:1px solid rgba(232,56,61,.25);border-radius:8px;padding:10px 16px;margin-bottom:16px;font-size:12px;color:var(--text-secondary);'>"
+$html += "&#128203;&nbsp; <strong>Resumen del periodo 01/05 &ndash; 14/05/2026</strong> &nbsp;&#183;&nbsp; Las inconsistencias incluyen atrasos de entrada, salidas anticipadas, demoras en retorno de break y breaks excedidos. Umbral de alerta: <strong style='color:var(--accent)'>15 minutos</strong>.</div>"
+
+$html += "<div class='section-box' style='padding:0;overflow:hidden;margin-bottom:0'>"
+$html += "<table class='resumen-table'>"
+$html += "<thead><tr>"
+$html += "<th style='width:40px'>#</th>"
+$html += "<th>Operario</th>"
+$html += "<th>Grupo</th>"
+$html += "<th class='tc'>Dias Lab.</th>"
+$html += "<th class='tc'>Presentes</th>"
+$html += "<th class='tc'>100% Asist.</th>"
+$html += "<th class='tc'>Inconsistencias</th>"
+$html += "<th class='tc'>Estado</th>"
+$html += "</tr></thead><tbody>"
+
+$rowNum = 0
+foreach ($g in $grupos) {
+    $personasGrupo = $allPersonas | Where-Object { $_.Grupo -eq $g }
+    $html += "<tr class='resumen-group-row' data-group='$g'><td colspan='8'>$g &mdash; $($personasGrupo.Count) persona$(if($personasGrupo.Count -gt 1){'s'})</td></tr>"
+    foreach ($per in $personasGrupo) {
+        $rowNum++
+        $rsmId        = "$($per.Apellidos)_$($per.Nombre)" -replace '\s','_' -replace '[^a-zA-Z0-9_]','X'
+        $realAusRsm   = [int]($per.AusReales.Count)
+        $asistOK      = $realAusRsm -eq 0
+        $inconsMin    = [int]$per.TotalInconsistenciaMin
+        $inconsStr    = MinToStr $inconsMin
+        $estadoOK     = $asistOK -and $inconsMin -le 15
+        $asistSymbol  = if ($asistOK)  { "<span class='check-ok'>&#10003;</span>"  } else { "<span class='check-bad'>&#10007;</span>" }
+        $estadoSymbol = if ($estadoOK) { "<span class='check-ok'>&#10003;</span>"  } else { "<span class='check-bad'>&#10007;</span>" }
+        $inconsClass  = if ($estadoOK) { "incons-ok" } else { "incons-bad" }
+        $presColor    = if ($per.nAusente -eq 0) { "color:var(--green)" } elseif ($realAusRsm -gt 0) { "color:var(--red)" } else { "color:var(--orange)" }
+
+        # Fila principal (clickeable)
+        $html += "<tr id='rsm_$rsmId' class='rsm-row' data-group='$g' onclick='toggleRsmDetail(`"$rsmId`")'>"
+        $html += "<td class='tc'><span class='num-circle'>$rowNum</span></td>"
+        $html += "<td class='td-name'><span class='rsm-chevron'>&#9654;</span>$($per.Apellidos), $($per.Nombre)</td>"
+        $html += "<td class='td-grupo'>$($per.Grupo)</td>"
+        $html += "<td class='tc'>$($per.nLab)</td>"
+        $html += "<td class='tc' style='$presColor'>$($per.nPresente)</td>"
+        $html += "<td class='tc'>$asistSymbol</td>"
+        $html += "<td class='tc $inconsClass'>$inconsStr</td>"
+        $html += "<td class='tc'>$estadoSymbol</td>"
+        $html += "</tr>"
+
+        # Fila detalle (colapsada por defecto)
+        $html += "<tr id='detail_$rsmId' class='resumen-detail' data-group='$g' style='display:none'>"
+        $html += "<td colspan='8'><div class='rsm-grid'>"
+
+        if ($per.Atrasos.Count -gt 0) {
+            $html += "<div class='rsm-block'>"
+            $html += "<h6 style='color:var(--orange)'>&#128336; Atrasos de entrada &mdash; $(MinToStr $per.TotalAtrasoMin) total</h6>"
+            foreach ($a in $per.Atrasos) {
+                $html += "<div class='rsm-item'><span class='rsm-fecha'>$($a.Fecha)</span><span class='rsm-val' style='color:var(--orange)'>$($a.AtrasoStr)</span></div>"
+            }
+            $html += "</div>"
+        }
+
+        if ($per.Adelantos.Count -gt 0) {
+            $html += "<div class='rsm-block'>"
+            $html += "<h6 style='color:var(--purple)'>&#9194; Salidas anticipadas &mdash; $(MinToStr $per.TotalAdelantoMin) total</h6>"
+            foreach ($a in $per.Adelantos) {
+                $html += "<div class='rsm-item'><span class='rsm-fecha'>$($a.Fecha)</span><span class='rsm-val' style='color:var(--purple)'>$($a.AdelantoStr)</span></div>"
+            }
+            $html += "</div>"
+        }
+
+        if ($per.DemoraBreak.Count -gt 0) {
+            $html += "<div class='rsm-block'>"
+            $html += "<h6 style='color:var(--orange)'>&#9203; Demoras en retorno de break</h6>"
+            foreach ($d in $per.DemoraBreak) {
+                $html += "<div class='rsm-item'><span class='rsm-fecha'>$($d.Fecha)</span><span class='rsm-val' style='color:var(--orange)'>$($d.DemoraStr)</span></div>"
+            }
+            $html += "</div>"
+        }
+
+        if ($per.BreakExcedido.Count -gt 0) {
+            $html += "<div class='rsm-block'>"
+            $html += "<h6 style='color:var(--orange)'>&#9200; Breaks excedidos (&gt;65 min)</h6>"
+            foreach ($b in $per.BreakExcedido) {
+                $excesoBE = $b.BreakMin - 60
+                $html += "<div class='rsm-item'><span class='rsm-fecha'>$($b.Fecha)</span><span class='rsm-val' style='color:var(--orange)'>$($b.BreakStr) (+${excesoBE}m)</span></div>"
+            }
+            $html += "</div>"
+        }
+
+        if ($per.AusReales.Count -gt 0) {
+            $html += "<div class='rsm-block'>"
+            $html += "<h6 style='color:var(--red)'>&#128683; Ausencias ($($per.AusReales.Count))</h6>"
+            foreach ($a in $per.AusReales) {
+                $html += "<div class='rsm-item'><span class='rsm-fecha'>$($a.Fecha)</span><span class='rsm-val' style='color:var(--red)'>Ausente</span></div>"
+            }
+            $html += "</div>"
+        }
+
+        if ($inconsMin -eq 0 -and $per.AusReales.Count -eq 0) {
+            $html += "<div style='color:var(--green);font-size:12px;font-style:italic;padding:4px 0'>&#10003; Sin inconsistencias ni ausencias en el periodo.</div>"
+        }
+
+        $html += "</div></td></tr>"
+    }
+}
+
+$html += "</tbody></table></div>"
+$html += '</div>'  # tab-resumen
+
 # ---- TAB ASISTENCIA ----
-$html += '<div id="tab-asistencia" class="tab-panel active">'
+$html += '<div id="tab-asistencia" class="tab-panel">'
 
 foreach ($g in $grupos) {
     $personasGrupo = $allPersonas | Where-Object { $_.Grupo -eq $g }
@@ -777,6 +931,13 @@ function toggle(id) {
     var card = document.getElementById(id);
     card.classList.toggle('open');
 }
+function toggleRsmDetail(id) {
+    var detail = document.getElementById('detail_' + id);
+    var row    = document.getElementById('rsm_'    + id);
+    var isOpen = detail.style.display !== 'none';
+    detail.style.display = isOpen ? 'none' : '';
+    row.classList.toggle('open', !isOpen);
+}
 function switchTab(tab) {
     document.querySelectorAll('.tab-panel').forEach(function(el){ el.classList.remove('active'); });
     document.querySelectorAll('.main-tab').forEach(function(el){ el.classList.remove('active'); });
@@ -784,13 +945,16 @@ function switchTab(tab) {
     event.target.classList.add('active');
     currentTab = tab;
 }
-var currentTab = 'asistencia';
+var currentTab = 'resumen';
 var allExpanded = false;
 function filterGroup(group, btn) {
     document.querySelectorAll('.group-btn').forEach(function(b){ b.classList.remove('active'); });
     btn.classList.add('active');
     document.querySelectorAll('.group-section').forEach(function(s){
         s.style.display = (group === 'all' || s.dataset.group === group) ? '' : 'none';
+    });
+    document.querySelectorAll('tr[data-group]').forEach(function(r){
+        r.style.display = (group === 'all' || r.dataset.group === group) ? '' : 'none';
     });
 }
 function toggleAll() {
