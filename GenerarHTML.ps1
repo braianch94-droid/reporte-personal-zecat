@@ -30,6 +30,7 @@ $data = @()
 for ($r = 3; $r -le $totalRows; $r++) {
     $data += [PSCustomObject]@{
         Apellidos=$srcWs.Cells.Item($r,1).Text; Nombre=$srcWs.Cells.Item($r,2).Text
+        Identificador=$srcWs.Cells.Item($r,3).Text
         Grupo=$srcWs.Cells.Item($r,4).Text; Fecha=$srcWs.Cells.Item($r,5).Text
         Turno=$srcWs.Cells.Item($r,7).Text; E1=$srcWs.Cells.Item($r,8).Text
         Atraso1=$srcWs.Cells.Item($r,10).Text
@@ -131,6 +132,8 @@ foreach ($p in $personas) {
     $apell = $pts[0]; $nom = $pts[1]; $grp = $pts[2]
     $esTurnoCorto = ($turnoCortoApellidos | Where-Object { $apell -like "*$_*" }).Count -gt 0
     $rows = $dataWD | Where-Object { $_.Apellidos -eq $apell -and $_.Nombre -eq $nom }
+    $identificador = ($rows | Where-Object { $_.Identificador -ne '' } | Select-Object -First 1).Identificador
+    if (-not $identificador) { $identificador = '' }
 
     # Asistencia
     $nFeriado   = [int](@($rows | Where-Object { $_.Fecha -match '\(F\)' -or ($feriadosPattern -ne '' -and $_.Fecha -match $feriadosPattern) }).Count)
@@ -306,7 +309,7 @@ foreach ($p in $personas) {
     $totalOTMin = $totalOT50 + $totalOT100
 
     $allPersonas += [PSCustomObject]@{
-        Apellidos=$apell; Nombre=$nom; Grupo=$grp
+        Apellidos=$apell; Nombre=$nom; Grupo=$grp; Identificador=$identificador
         nLab=$nLab; nPresente=$nPresente; nAusente=$nAusente; Pct=$pct
         nFeriado=$nFeriado; nDescanso=$nDescanso
         AusDetails=$ausDetails
@@ -542,6 +545,7 @@ $html += "<table class='resumen-table'>"
 $html += "<thead><tr>"
 $html += "<th style='width:40px'>#</th>"
 $html += "<th>Operario</th>"
+$html += "<th class='tc'>Identificador</th>"
 $html += "<th>Grupo</th>"
 $html += "<th class='tc'>Dias Lab.</th>"
 $html += "<th class='tc'>Presentes</th>"
@@ -553,7 +557,7 @@ $html += "</tr></thead><tbody>"
 $rowNum = 0
 foreach ($g in $grupos) {
     $personasGrupo = $allPersonas | Where-Object { $_.Grupo -eq $g }
-    $html += "<tr class='resumen-group-row' data-group='$g'><td colspan='8'>$g &mdash; $($personasGrupo.Count) persona$(if($personasGrupo.Count -gt 1){'s'})</td></tr>"
+    $html += "<tr class='resumen-group-row' data-group='$g'><td colspan='9'>$g &mdash; $($personasGrupo.Count) persona$(if($personasGrupo.Count -gt 1){'s'})</td></tr>"
     foreach ($per in $personasGrupo) {
         $rowNum++
         $rsmId        = "$($per.Apellidos)_$($per.Nombre)" -replace '\s','_' -replace '[^a-zA-Z0-9_]','X'
@@ -571,6 +575,7 @@ foreach ($g in $grupos) {
         $html += "<tr id='rsm_$rsmId' class='rsm-row' data-group='$g' onclick='toggleRsmDetail(`"$rsmId`")'>"
         $html += "<td class='tc'><span class='num-circle'>$rowNum</span></td>"
         $html += "<td class='td-name'><span class='rsm-chevron'>&#9654;</span>$($per.Apellidos), $($per.Nombre)</td>"
+        $html += "<td class='tc' style='color:var(--text-secondary);font-family:monospace;font-size:11px'>$($per.Identificador)</td>"
         $html += "<td class='td-grupo'>$($per.Grupo)</td>"
         $html += "<td class='tc'>$($per.nLab)</td>"
         $html += "<td class='tc' style='$presColor'>$($per.nPresente)</td>"
@@ -581,7 +586,7 @@ foreach ($g in $grupos) {
 
         # Fila detalle (colapsada por defecto)
         $html += "<tr id='detail_$rsmId' class='resumen-detail' data-group='$g' style='display:none'>"
-        $html += "<td colspan='8'><div class='rsm-grid'>"
+        $html += "<td colspan='9'><div class='rsm-grid'>"
 
         if ($per.DeficitDias.Count -gt 0) {
             $html += "<div class='rsm-block'>"
@@ -1072,19 +1077,20 @@ function filterGroup(group, btn) {
 function exportarResumen() {
     var rows = document.querySelectorAll('.resumen-table tbody tr.rsm-row');
     var csv = '﻿'; // BOM para que Excel abra bien en español
-    csv += 'N°;Apellido y Nombre;Grupo;Dias Laborales;Presentes;100% Asistencia;Inconsistencias;Estado\n';
+    csv += 'N°;Apellido y Nombre;Identificador;Grupo;Dias Laborales;Presentes;100% Asistencia;Inconsistencias;Estado\n';
     rows.forEach(function(row) {
         if (row.style.display === 'none') return;
         var cols = row.querySelectorAll('td');
         var num    = cols[0].innerText.trim();
         var nombre = cols[1].innerText.replace('▶','').trim();
-        var grupo  = cols[2].innerText.trim();
-        var diasL  = cols[3].innerText.trim();
-        var pres   = cols[4].innerText.trim();
-        var asist  = cols[5].querySelector('.check-ok') ? 'SI' : 'NO';
-        var incons = cols[6].innerText.trim();
-        var estado = cols[7].querySelector('.check-ok') ? 'OK' : 'X';
-        csv += [num,nombre,grupo,diasL,pres,asist,incons,estado].join(';') + '\n';
+        var ident  = cols[2].innerText.trim();
+        var grupo  = cols[3].innerText.trim();
+        var diasL  = cols[4].innerText.trim();
+        var pres   = cols[5].innerText.trim();
+        var asist  = cols[6].querySelector('.check-ok') ? 'SI' : 'NO';
+        var incons = cols[7].innerText.trim();
+        var estado = cols[8].querySelector('.check-ok') ? 'OK' : 'X';
+        csv += [num,nombre,ident,grupo,diasL,pres,asist,incons,estado].join(';') + '\n';
     });
     var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     var url  = URL.createObjectURL(blob);
