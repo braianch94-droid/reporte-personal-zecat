@@ -23,7 +23,7 @@ function GetFechaISO([string]$fecha) {
 # ---- READ SOURCE ----
 $xl = New-Object -ComObject Excel.Application
 $xl.Visible = $false; $xl.DisplayAlerts = $false
-$srcWb = $xl.Workbooks.Open("C:\Users\bchevasco\OneDrive - Articulos Promocionales SA\Escritorio\Asistencia\Asistencia.xlsx")
+$srcWb = $xl.Workbooks.Open("$PSScriptRoot\Asistencia.xlsx")
 $srcWs = $srcWb.Sheets.Item(1)
 $totalRows = $srcWs.UsedRange.Rows.Count
 $data = @()
@@ -1117,7 +1117,7 @@ function toggleAll() {
 </html>
 '@
 
-$outPath = "C:\Users\bchevasco\OneDrive - Articulos Promocionales SA\Escritorio\Asistencia\Reporte_Personal.html"
+$outPath = "$PSScriptRoot\Reporte_Personal.html"
 [System.IO.File]::WriteAllText($outPath, $html, [System.Text.Encoding]::UTF8)
 Write-Host "LISTO: $outPath"
 
